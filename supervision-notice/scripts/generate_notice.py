@@ -393,11 +393,12 @@ def fill_notice_body_cell(cell, contractor='', subject='', content='', deadline=
         p2.addnext(rectify_p)
 
 
-def fill_notice_no_cell(cell, year='', seq=''):
+def fill_notice_no_cell(cell, year='', seq='', notice_no=''):
     """
     填写通知单编号单元格。
     原格式："监理[      ]通知     号"
     填入后："监理[ year ]通知 seq 号"
+    若传入自定义编号 notice_no，则直接使用该编号。
     """
     paragraphs = cell.findall(qn('w:p'))
     if not paragraphs:
@@ -408,9 +409,12 @@ def fill_notice_no_cell(cell, year='', seq=''):
 
     r = p.makeelement(qn('w:r'), {})
     t = r.makeelement(qn('w:t'), {})
-    year_str = year if year else '      '
-    seq_str = seq if seq else '     '
-    t.text = f'监理[{year_str}]通知{seq_str}号'
+    if notice_no:
+        t.text = notice_no
+    else:
+        year_str = year if year else '      '
+        seq_str = seq if seq else '     '
+        t.text = f'监理[{year_str}]通知{seq_str}号'
     t.set(qn('xml:space'), 'preserve')
     r.append(t)
     set_run_font_songti(r)
@@ -517,6 +521,12 @@ def _calc_image_size(img_path, max_width, max_height):
     return w, h
 
 
+def _is_portrait(img_path):
+    """判断图片是否为竖版（高度 > 宽度）。正方形归为横版。"""
+    img = DocxImage.from_file(img_path)
+    return img.height > img.width
+
+
 def add_images_to_document(doc, image_paths):
     """
     在文档末尾添加分页符并插入附件图片。
@@ -527,7 +537,13 @@ def add_images_to_document(doc, image_paths):
       - 4张：2列×2行，填满
       - 5张：2列×3行，第3行合并居中
       - 6张：2列×3行，填满
-    尺寸：非1张时图片宽度8cm（等比缩放，最大高度8cm）；1张时较大尺寸
+    尺寸规则（固定显示尺寸，按图片数量及横竖版区分）：
+      - 1张横版：16cm × 12cm；1张竖版：16cm × 21cm
+      - 2张全竖版：8cm × 10cm；2张横版/混合：8cm × 6cm
+      - 3张：8cm × 6cm
+      - 4张全竖版：8cm × 10cm；4张横版/混合：8cm × 6cm
+      - 5~6张：8cm × 6cm
+    编号：每张图片下方居中标注"图1、图2……"，全局连续编号（跨页不断号）
     分页：超过6张自动翻页，每页前插入分页符
     无图片时不做任何操作；图片文件不存在时跳过并提示
     """
@@ -554,42 +570,50 @@ def add_images_to_document(doc, image_paths):
     pages = [valid_images[i:i + MAX_PER_PAGE]
              for i in range(0, len(valid_images), MAX_PER_PAGE)]
 
+    global_img_num = 0  # 全局图片编号计数器（跨页连续）
+
     for page_images in pages:
         # 每页前加分页符（第一页与通知单隔开，后续页之间也隔开）
         doc.add_page_break()
 
         n = len(page_images)
 
-        # 根据图片数量确定布局参数
+        # 判断本组图片是否全为竖版
+        all_portrait = all(_is_portrait(img) for img in page_images)
+
+        # 根据图片数量及横竖版确定布局和固定显示尺寸
         if n == 1:
             cols, rows = 1, 1
-            img_max_w = Cm(16)
-            img_max_h = Cm(20)
+            if _is_portrait(page_images[0]):
+                img_w, img_h = Cm(16), Cm(21)
+            else:
+                img_w, img_h = Cm(16), Cm(12)
             merge_last = False
         elif n == 2:
             cols, rows = 1, 2
-            img_max_w = Cm(8)
-            img_max_h = Cm(8)
+            if all_portrait:
+                img_w, img_h = Cm(8), Cm(10)
+            else:
+                img_w, img_h = Cm(8), Cm(6)
             merge_last = False
         elif n == 3:
             cols, rows = 2, 2
-            img_max_w = Cm(8)
-            img_max_h = Cm(8)
+            img_w, img_h = Cm(8), Cm(6)
             merge_last = True
         elif n == 4:
             cols, rows = 2, 2
-            img_max_w = Cm(8)
-            img_max_h = Cm(8)
+            if all_portrait:
+                img_w, img_h = Cm(8), Cm(10)
+            else:
+                img_w, img_h = Cm(8), Cm(6)
             merge_last = False
         elif n == 5:
             cols, rows = 2, 3
-            img_max_w = Cm(8)
-            img_max_h = Cm(8)
+            img_w, img_h = Cm(8), Cm(6)
             merge_last = True
         else:  # n == 6
             cols, rows = 2, 3
-            img_max_w = Cm(8)
-            img_max_h = Cm(8)
+            img_w, img_h = Cm(8), Cm(6)
             merge_last = False
 
         # 创建无边框表格
@@ -602,8 +626,9 @@ def add_images_to_document(doc, image_paths):
             last_row_idx = rows - 1
             table.cell(last_row_idx, 0).merge(table.cell(last_row_idx, cols - 1))
 
-        # 逐张填入图片
+        # 逐张填入图片（全局连续编号，固定显示尺寸）
         for idx, img_path in enumerate(page_images):
+            global_img_num += 1
             row = idx // cols
             col = idx % cols
             cell = table.cell(row, col)
@@ -612,13 +637,17 @@ def add_images_to_document(doc, image_paths):
             p = cell.paragraphs[0]
             p.alignment = WD_ALIGN_PARAGRAPH.CENTER
             run = p.add_run()
-            # 等比缩放后插入图片
-            w, h = _calc_image_size(img_path, img_max_w, img_max_h)
-            run.add_picture(img_path, width=w, height=h)
+            # 按固定尺寸插入图片
+            run.add_picture(img_path, width=img_w, height=img_h)
+            # 图片下方标注编号（图1、图2...，全局连续，跨页不断号）
+            caption = cell.add_paragraph()
+            caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            cap_run = caption.add_run(f'图{global_img_num}')
+            set_run_font_songti(cap_run._r)
 
 
 def generate_notice(output_path, project_name='', notice_year='', notice_seq='',
-                    contractor='', subject='', content='', engineer='', date_str='',
+                    notice_no='', contractor='', subject='', content='', engineer='', date_str='',
                     deadline='', image_paths=None):
     """
     生成监理通知单文件。
@@ -628,6 +657,7 @@ def generate_notice(output_path, project_name='', notice_year='', notice_seq='',
         project_name: 工程名称
         notice_year: 通知单编号-年份（如"2026"）
         notice_seq: 通知单编号-序号（如"001"）
+        notice_no: 自定义通知单编号（如"CJJLTZD-20260901"，传入后直接使用，忽略年份序号格式）
         contractor: 致（施工单位/项目经理部名称）
         subject: 事由（原始主题描述，将自动优化为简短格式）
         content: 内容（原始正文描述，将自动优化并编号）
@@ -657,7 +687,7 @@ def generate_notice(output_path, project_name='', notice_year='', notice_seq='',
             set_cell_text(tcs[1], project_name)
         # 编号单元格：最后一个tc
         if len(tcs) >= 3:
-            fill_notice_no_cell(tcs[-1], notice_year, notice_seq)
+            fill_notice_no_cell(tcs[-1], notice_year, notice_seq, notice_no)
 
     # 行2: 致/事由/内容
     if len(trs) > 2:
@@ -692,6 +722,7 @@ def main():
     parser.add_argument('--project', default='', help='工程名称')
     parser.add_argument('--notice-year', default='', help='通知单编号-年份（如2026）')
     parser.add_argument('--notice-seq', default='', help='通知单编号-序号（如001）')
+    parser.add_argument('--notice-no', default='', help='自定义通知单编号（如CJJLTZD-20260901，传入后直接使用该编号）')
     parser.add_argument('--contractor', default='', help='致（施工单位/项目经理部名称）')
     parser.add_argument('--subject', default='', help='事由（原始主题描述，将自动优化为简短格式）')
     parser.add_argument('--content', default='', help='内容（原始正文，将自动优化并按1、2、编号）')
@@ -718,6 +749,7 @@ def main():
         project_name=args.project,
         notice_year=args.notice_year,
         notice_seq=args.notice_seq,
+        notice_no=args.notice_no,
         contractor=args.contractor,
         subject=args.subject,
         content=content,
