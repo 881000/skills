@@ -11,6 +11,10 @@ import re
 from copy import deepcopy
 from docx import Document
 from docx.oxml.ns import qn
+from docx.shared import Cm
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.image.image import Image as DocxImage
 
 
 def get_template_path():
@@ -468,9 +472,154 @@ def set_document_font_songti(doc):
                         set_run_font_songti(r._r)
 
 
+def _set_table_no_border(table):
+    """设置表格无边框（通过 OOXML 操作 tblBorders）"""
+    tbl = table._tbl
+    tblPr = tbl.find(qn('w:tblPr'))
+    if tblPr is None:
+        tblPr = tbl.makeelement(qn('w:tblPr'), {})
+        tbl.insert(0, tblPr)
+    # 移除已有边框设置
+    for borders in tblPr.findall(qn('w:tblBorders')):
+        tblPr.remove(borders)
+    # 创建无边框设置
+    borders = tblPr.makeelement(qn('w:tblBorders'), {})
+    for border_name in ('top', 'left', 'bottom', 'right', 'insideH', 'insideV'):
+        border = borders.makeelement(qn(f'w:{border_name}'), {
+            qn('w:val'): 'none',
+            qn('w:sz'): '0',
+            qn('w:space'): '0',
+            qn('w:color'): 'auto',
+        })
+        borders.append(border)
+    tblPr.append(borders)
+
+
+def _calc_image_size(img_path, max_width, max_height):
+    """
+    根据图片原始宽高比，在 max_width × max_height 约束内等比缩放。
+    返回 (width, height)，单位为 EMU（python-docx 可直接使用）。
+    """
+    img = DocxImage.from_file(img_path)
+    orig_w = img.width   # EMU
+    orig_h = img.height  # EMU
+    if orig_w == 0 or orig_h == 0:
+        return max_width, max_height
+    ratio = orig_w / orig_h
+
+    # 先按最大宽度缩放
+    w = max_width
+    h = int(w / ratio)
+    # 若高度超限，则按最大高度缩放
+    if h > max_height:
+        h = max_height
+        w = int(h * ratio)
+    return w, h
+
+
+def add_images_to_document(doc, image_paths):
+    """
+    在文档末尾添加分页符并插入附件图片。
+    布局规则（每页最多6张）：
+      - 1张：1行×1列，单张居中（较大尺寸）
+      - 2张：1列×2行，上下排列
+      - 3张：2列×2行，第2行合并居中
+      - 4张：2列×2行，填满
+      - 5张：2列×3行，第3行合并居中
+      - 6张：2列×3行，填满
+    尺寸：非1张时图片宽度8cm（等比缩放，最大高度8cm）；1张时较大尺寸
+    分页：超过6张自动翻页，每页前插入分页符
+    无图片时不做任何操作；图片文件不存在时跳过并提示
+    """
+    if not image_paths:
+        return
+
+    # 过滤有效图片
+    valid_images = []
+    for img_path in image_paths:
+        img_path = img_path.strip()
+        if not img_path:
+            continue
+        if os.path.exists(img_path):
+            valid_images.append(img_path)
+        else:
+            print(f'⚠️ 图片文件不存在，已跳过: {img_path}')
+
+    if not valid_images:
+        return
+
+    MAX_PER_PAGE = 6
+
+    # 按每页6张分组
+    pages = [valid_images[i:i + MAX_PER_PAGE]
+             for i in range(0, len(valid_images), MAX_PER_PAGE)]
+
+    for page_images in pages:
+        # 每页前加分页符（第一页与通知单隔开，后续页之间也隔开）
+        doc.add_page_break()
+
+        n = len(page_images)
+
+        # 根据图片数量确定布局参数
+        if n == 1:
+            cols, rows = 1, 1
+            img_max_w = Cm(16)
+            img_max_h = Cm(20)
+            merge_last = False
+        elif n == 2:
+            cols, rows = 1, 2
+            img_max_w = Cm(8)
+            img_max_h = Cm(8)
+            merge_last = False
+        elif n == 3:
+            cols, rows = 2, 2
+            img_max_w = Cm(8)
+            img_max_h = Cm(8)
+            merge_last = True
+        elif n == 4:
+            cols, rows = 2, 2
+            img_max_w = Cm(8)
+            img_max_h = Cm(8)
+            merge_last = False
+        elif n == 5:
+            cols, rows = 2, 3
+            img_max_w = Cm(8)
+            img_max_h = Cm(8)
+            merge_last = True
+        else:  # n == 6
+            cols, rows = 2, 3
+            img_max_w = Cm(8)
+            img_max_h = Cm(8)
+            merge_last = False
+
+        # 创建无边框表格
+        table = doc.add_table(rows=rows, cols=cols)
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        _set_table_no_border(table)
+
+        # 最后一行合并居中（当最后一行只有1张图时）
+        if merge_last and cols > 1:
+            last_row_idx = rows - 1
+            table.cell(last_row_idx, 0).merge(table.cell(last_row_idx, cols - 1))
+
+        # 逐张填入图片
+        for idx, img_path in enumerate(page_images):
+            row = idx // cols
+            col = idx % cols
+            cell = table.cell(row, col)
+            # 清空单元格默认段落
+            cell.text = ''
+            p = cell.paragraphs[0]
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            run = p.add_run()
+            # 等比缩放后插入图片
+            w, h = _calc_image_size(img_path, img_max_w, img_max_h)
+            run.add_picture(img_path, width=w, height=h)
+
+
 def generate_notice(output_path, project_name='', notice_year='', notice_seq='',
                     contractor='', subject='', content='', engineer='', date_str='',
-                    deadline=''):
+                    deadline='', image_paths=None):
     """
     生成监理通知单文件。
 
@@ -484,6 +633,8 @@ def generate_notice(output_path, project_name='', notice_year='', notice_seq='',
         content: 内容（原始正文描述，将自动优化并编号）
         engineer: 总/专业监理工程师（签字）
         date_str: 日期（如"2026年8月21日"）
+        deadline: 整改截止日期（如"2026年9月5日"）
+        image_paths: 附件图片路径列表（有图片时另起一页附在通知单后，无图片时不添加）
     """
     template_path = get_template_path()
     if not os.path.exists(template_path):
@@ -523,6 +674,9 @@ def generate_notice(output_path, project_name='', notice_year='', notice_seq='',
     # 全局统一字体为宋体（中文、英文）
     set_document_font_songti(doc)
 
+    # 附件图片：有图片时另起一页附在通知单后，无图片时不添加
+    add_images_to_document(doc, image_paths)
+
     # 保存
     output_dir = os.path.dirname(os.path.abspath(output_path))
     if output_dir and not os.path.exists(output_dir):
@@ -548,6 +702,10 @@ def main():
     # 支持从文件读取长内容
     parser.add_argument('--content-file', default='', help='从文件读取正文内容')
 
+    # 附件图片：可多次指定，有图片时另起一页附在通知单后
+    parser.add_argument('--image', action='append', default=[], dest='images',
+                        help='附件图片路径（可多次 --image 指定多张，有图时另起一页附后）')
+
     args = parser.parse_args()
 
     content = args.content
@@ -565,7 +723,8 @@ def main():
         content=content,
         engineer=args.engineer,
         date_str=args.date,
-        deadline=args.deadline
+        deadline=args.deadline,
+        image_paths=args.images
     )
 
     print(f'✅ 监理通知单已生成: {output}')
