@@ -1,0 +1,86 @@
+{
+  "version": "1.0.0",
+  "categories": {
+    "建筑工程": {
+      "规范": [
+        {
+          "name": "建筑施工手册",
+          "repo": "881000/building-construction-handbook",
+          "branch": "main",
+          "version": "1.0.0",
+          "description": "《建筑施工手册（第六版）》全文知识库，覆盖施工工艺、技术、方案、规范、数据、质量与安全"
+        },
+        {
+          "name": "工程建设规范",
+          "repo": "881000/engineering-construction-standards",
+          "branch": "main",
+          "version": "1.0.0",
+          "description": "内置建筑标准设计图集与大量建筑标准规范/规程原文，覆盖房建、道路、钢结构、电气、海绵城市等"
+        }
+      ],
+      "监理": [
+        {
+          "name": "监理日志",
+          "repo": "881000/supervision-diary",
+          "branch": "main",
+          "version": "1.0.0",
+          "description": "基于标准监理日志模板生成格式一致的docx文件，对四大业务板块进行专业表达优化与智能摘要"
+        },
+        {
+          "name": "监理通知单",
+          "repo": "881000/supervision-notice",
+          "branch": "main",
+          "version": "1.0.0",
+          "description": "基于标准监理通知单模板生成格式一致的docx文件，事由简短化优化，正文专业表达优化并自动编号"
+        }
+      ]
+    },
+    "交易平台": {
+      "招投标": [
+        {
+          "name": "招投标查询",
+          "repo": "881000/tendering-and-bidding",
+          "branch": "main",
+          "version": "1.0.0",
+          "description": "查询企业中标项目与中标候选人信息，数据仅采信官方来源（公共资源交易平台及主管部门官网）"
+        }
+      ]
+    },
+    "创意设计": {
+      "设计": [
+        {
+          "name": "影像蒸馏",
+          "repo": "881000/image-distillation",
+          "branch": "main",
+          "version": "1.0.0",
+          "description": "把用户照片蒸馏成独立成立的极简纸刊插画海报（zine poster），原创插画+艺术主张+高纯度色彩+作者性文字"
+        },
+        {
+          "name": "莫兰迪电影海报",
+          "repo": "881000/morandi-movie-poster",
+          "branch": "main",
+          "version": "1.0.0",
+          "description": "把个人照片转成源图忠实、纯文字驱动的莫兰迪电影感海报，照片作为锁定底版保持不变"
+        },
+        {
+          "name": "实景拼贴",
+          "repo": "881000/photo-collage",
+          "branch": "main",
+          "version": "1.0.0",
+          "description": "把用户照片做成竖版3:5纸刊拼贴海报，在源图导出的抽象插画场中锚定真实摄影部分"
+        }
+      ]
+    },
+    "生活娱乐": {
+      "解梦": [
+        {
+          "name": "周公解梦",
+          "repo": "881000/dream-dictionary",
+          "branch": "main",
+          "version": "1.0.0",
+          "description": "基于中国传统《周公解梦》民俗体系的逻辑化、结构化梦境解读，五步解梦流程+置信度标注"
+        }
+      ]
+    }
+  }
+}
